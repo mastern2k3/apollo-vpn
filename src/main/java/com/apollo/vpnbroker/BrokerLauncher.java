@@ -5,6 +5,7 @@ import com.apollo.schema.RequestSpec;
 import com.apollo.schema.ResponseSpec;
 import com.apollo.schema.StatsSpec;
 import com.google.gson.Gson;
+import com.hedera.file.FileAppend;
 import com.hedera.file.FileCreate;
 import com.hedera.sdk.account.HederaAccount;
 import com.hedera.sdk.common.HederaKey;
@@ -24,7 +25,6 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -46,8 +46,9 @@ public class BrokerLauncher {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(7891), 0);
 
-        server.createContext("/stats", new BrokerLauncher.StateHandler());
-        server.createContext("/getfile", new BrokerLauncher.GetFileHandler());
+        server.createContext("/api/stats", new BrokerLauncher.StateHandler());
+        server.createContext("/api/getfile", new BrokerLauncher.GetFileHandler());
+        server.createContext("/api/postreq", new BrokerLauncher.PostRequestHandler());
 
         Thread thread = new Thread(new BrokerLoop());
 
@@ -104,6 +105,22 @@ public class BrokerLauncher {
         }
     }
 
+    static class PostRequestHandler extends BaseHandler {
+        @Override
+        public String handleToString(HttpExchange t) throws Exception {
+
+            String path = t.getRequestURI().getPath();
+            String idStr = path.substring(path.lastIndexOf('/') + 1);
+
+            byte[] decodedBytes = Base64.getDecoder().decode(idStr);
+            String decodedString = new String(decodedBytes);
+
+            FileAppend.append(_requestsFile, (_gson.toJson(RequestSpec.of(decodedString)) + "\n").getBytes(StandardCharsets.UTF_8));
+
+            return "{\"ok\":true}";
+        }
+    }
+
     static class GetFileHandler extends BaseHandler {
         @Override
         public String handleToString(HttpExchange t) throws Exception {
@@ -155,6 +172,10 @@ public class BrokerLauncher {
                         }
                     }
 
+                    Thread.sleep(2000);
+
+                    writeResponses(responses);
+
                     for (ResponseSpec spec : responses) {
                         logger.info("fetched {}", _gson.toJson(spec));
                     }
@@ -175,6 +196,20 @@ public class BrokerLauncher {
         }
     }
 
+    private static void writeResponses(ArrayList<ResponseSpec> responses) throws Exception {
+
+        StringBuilder builder = new StringBuilder();
+
+        for (ResponseSpec spec : responses) {
+            builder.append(_gson.toJson(spec));
+            builder.append("\n");
+        }
+
+        byte[] bytes = builder.toString().getBytes(StandardCharsets.UTF_8);
+
+        _responseFile.append(bytes);
+    }
+
     private static HederaFile createRequestsFile() throws Exception {
 
         HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
@@ -187,9 +222,9 @@ public class BrokerLauncher {
         hederaFile.expirationTime = Instant.now().plusSeconds(10);
 
         hederaFile =
-                FileCreate.create(
-                        hederaFile,
-                        (_gson.toJson(RequestSpec.of("https://api.myjson.com/bins/gwzhc")) + "\n").getBytes(StandardCharsets.UTF_8));
+            FileCreate.create(
+                hederaFile,
+                (_gson.toJson(RequestSpec.of("https://api.myjson.com/bins/gwzhc")) + "\n").getBytes(StandardCharsets.UTF_8));
 
         return hederaFile;
     }
