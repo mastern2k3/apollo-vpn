@@ -1,8 +1,12 @@
 package com.apollo.vpnbroker;
 
+import com.apollo.pubapi.PublicApiLauncher;
 import com.apollo.schema.RequestSpec;
 import com.apollo.schema.ResponseSpec;
+import com.apollo.schema.StatsSpec;
 import com.google.gson.Gson;
+import com.hedera.file.FileCreate;
+import com.hedera.sdk.account.HederaAccount;
 import com.hedera.sdk.common.HederaKey;
 import com.hedera.sdk.common.HederaTransactionAndQueryDefaults;
 import com.hedera.sdk.cryptography.HederaCryptoKeyPair;
@@ -23,15 +27,107 @@ import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.time.Instant;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class BrokerLauncher {
 
     static final Logger logger = LoggerFactory.getLogger(BrokerLauncher.class);
     public static Gson _gson = new Gson();
+
+    private static HederaFile _requestsFile;
+    private static HederaFile _responseFile;
+
+    public static void main(String[] args) throws Exception {
+
+        _requestsFile = createRequestsFile();
+        _responseFile = createResponseFile();
+
+        HttpServer server = HttpServer.create(new InetSocketAddress(7891), 0);
+
+        server.createContext("/stats", new BrokerLauncher.StateHandler());
+        server.createContext("/getfile", new BrokerLauncher.GetFileHandler());
+
+        Thread thread = new Thread(new BrokerLoop());
+
+        thread.start();
+
+        server.setExecutor(null);
+
+        logger.info("Broker api starting at http://127.0.0.1:7891/stats");
+        server.start();
+    }
+
+    static abstract class BaseHandler implements HttpHandler {
+
+        public abstract String handleToString(HttpExchange t) throws Exception;
+
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+
+            String response;
+
+            try {
+                response = handleToString(t);
+                t.sendResponseHeaders(200, response.length());
+            } catch (Exception ex) {
+                response = ex.toString();
+                t.sendResponseHeaders(500, response.length());
+            }
+
+            OutputStream os = t.getResponseBody();
+            os.write(response.getBytes());
+            os.close();
+        }
+    }
+
+    static class StateHandler extends BaseHandler {
+        @Override
+        public String handleToString(HttpExchange t) throws Exception {
+
+            HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+            HederaAccount hederaAccount = new HederaAccount();
+
+            hederaAccount.txQueryDefaults = qd;
+
+            hederaAccount.setHederaAccountID(qd.payingAccountID);
+
+            StatsSpec statsSpec = new StatsSpec();
+
+            statsSpec.balance = hederaAccount.getBalance();
+            statsSpec.reqFileNum = _requestsFile.fileNum;
+            statsSpec.resFileNum = _responseFile.fileNum;
+
+            return _gson.toJson(statsSpec);
+        }
+    }
+
+    static class GetFileHandler extends BaseHandler {
+        @Override
+        public String handleToString(HttpExchange t) throws Exception {
+
+            String path = t.getRequestURI().getPath();
+            String idStr = path.substring(path.lastIndexOf('/') + 1);
+
+            long id = Long.parseLong(idStr);
+
+            HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+            qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+            HederaFile hederaFile;
+
+            hederaFile = new HederaFile();
+
+            hederaFile.txQueryDefaults = qd;
+            hederaFile.fileNum = id;
+
+            byte[] contents = hederaFile.getContents();
+
+            return new String(contents, StandardCharsets.UTF_8);
+        }
+    }
 
     public static class BrokerLoop implements Runnable {
 
@@ -79,7 +175,40 @@ public class BrokerLauncher {
         }
     }
 
-    private static final long REQUEST_FILE_ID = 1023;
+    private static HederaFile createRequestsFile() throws Exception {
+
+        HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+        qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+
+        HederaFile hederaFile = new HederaFile();
+
+        hederaFile.txQueryDefaults = qd;
+        hederaFile.expirationTime = Instant.now().plusSeconds(10);
+
+        hederaFile =
+                FileCreate.create(
+                        hederaFile,
+                        (_gson.toJson(RequestSpec.of("https://api.myjson.com/bins/gwzhc")) + "\n").getBytes(StandardCharsets.UTF_8));
+
+        return hederaFile;
+    }
+
+    private static HederaFile createResponseFile() throws Exception {
+
+        HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+        qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+
+        HederaFile hederaFile = new HederaFile();
+
+        hederaFile.txQueryDefaults = qd;
+        hederaFile.expirationTime = Instant.now().plusSeconds(10);
+
+        hederaFile = FileCreate.create(hederaFile, new byte[0]);
+
+        return hederaFile;
+    }
 
     public static ResponseSpec LaunchRequest(RequestSpec requestSpec) throws IOException {
 
@@ -117,68 +246,33 @@ public class BrokerLauncher {
 
     public static RequestSpec[] getPendingRequests() throws Exception {
 
-        long id = REQUEST_FILE_ID ;
+        byte[] response = _responseFile.getContents();
 
-        HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+        Set<String> answered;
 
-        qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
-        HederaFile hederaFile;
-
-        hederaFile = new HederaFile();
-
-        hederaFile.txQueryDefaults = qd;
-        hederaFile.fileNum = id;
-
-        byte[] contents = hederaFile.getContents();
-
-        String[] lines = new String(contents, StandardCharsets.UTF_8).split("\n");
-
-        return Arrays.stream(lines).map(st -> _gson.fromJson(st, RequestSpec.class)).toArray(RequestSpec[]::new);
-    }
-
-    public static void main(String[] args) throws Exception {
-
-        HttpServer server = HttpServer.create(new InetSocketAddress(7891), 0);
-
-        server.createContext("/stats", new BrokerLauncher.StateHandler());
-
-        Thread thread = new Thread(new BrokerLoop());
-
-        thread.start();
-
-        server.setExecutor(null);
-
-        logger.info("Broker api starting at http://127.0.0.1:7891/stats");
-        server.start();
-    }
-
-    static abstract class BaseHandler implements HttpHandler {
-
-        public abstract String handleToString(HttpExchange t) throws Exception;
-
-        @Override
-        public void handle(HttpExchange t) throws IOException {
-
-            String response;
-
-            try {
-                response = handleToString(t);
-                t.sendResponseHeaders(200, response.length());
-            } catch (Exception ex) {
-                response = ex.toString();
-                t.sendResponseHeaders(500, response.length());
-            }
-
-            OutputStream os = t.getResponseBody();
-            os.write(response.getBytes());
-            os.close();
+        if (response.length == 0) {
+            answered = new HashSet<>();
+        } else {
+            answered =
+                Arrays.stream(new String(response, StandardCharsets.UTF_8).split("\n"))
+                    .map(st -> _gson.fromJson(st, ResponseSpec.class).id)
+                    .collect(Collectors.toSet());
         }
-    }
 
-    static class StateHandler extends BaseHandler {
-        @Override
-        public String handleToString(HttpExchange t) throws Exception {
-            return "ok";
+        Thread.sleep(2000);
+
+        byte[] contents = _requestsFile.getContents();
+
+        if (contents.length == 0) {
+            return new RequestSpec[0];
         }
+
+        RequestSpec[] requestSpecs =
+            Arrays.stream(new String(contents, StandardCharsets.UTF_8).split("\n"))
+                .map(st -> _gson.fromJson(st, RequestSpec.class))
+                .filter(st -> !answered.contains(st.id))
+                .toArray(RequestSpec[]::new);
+
+        return requestSpecs;
     }
 }
