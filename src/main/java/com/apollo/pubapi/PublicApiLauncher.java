@@ -3,10 +3,14 @@ package com.apollo.pubapi;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 
+import com.hedera.file.FileCreate;
 import com.hedera.sdk.common.HederaKey;
 import com.hedera.sdk.common.HederaTransactionAndQueryDefaults;
 import com.hedera.sdk.cryptography.HederaCryptoKeyPair;
+import com.hedera.sdk.file.HederaFile;
 import com.hedera.utilities.ExampleUtilities;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -18,7 +22,8 @@ public class PublicApiLauncher {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(7890), 0);
 
-        server.createContext("/test", new RootHandler());
+        server.createContext("/getfile", new GetFileHandler());
+        server.createContext("/putfile", new PutFileHandler());
         server.setExecutor(null);
         server.start();
     }
@@ -46,10 +51,49 @@ public class PublicApiLauncher {
         }
     }
 
-    static class RootHandler extends BaseHandler {
+    static class GetFileHandler extends BaseHandler {
         @Override
         public String handleToString(HttpExchange t) throws Exception {
-            return "Working";
+
+            String path = t.getRequestURI().getPath();
+            String idStr = path.substring(path.lastIndexOf('/') + 1);
+
+            long id = Long.parseLong(idStr);
+
+            HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+            qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+            HederaFile hederaFile;
+
+            hederaFile = new HederaFile();
+
+            hederaFile.txQueryDefaults = qd;
+            hederaFile.fileNum = id;
+
+            byte[] contents = hederaFile.getContents();
+
+            return new String(contents, StandardCharsets.UTF_8);
+        }
+    }
+
+    static class PutFileHandler extends BaseHandler {
+
+        @Override
+        public String handleToString(HttpExchange t) throws Exception {
+
+            HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+            qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+
+            HederaFile hederaFile = new HederaFile();
+
+            hederaFile.txQueryDefaults = qd;
+            hederaFile.fileNum = 9090;
+            hederaFile.expirationTime = Instant.now().plusSeconds(10);
+
+            hederaFile = FileCreate.create(hederaFile, "lol wat the fuck".getBytes(StandardCharsets.UTF_8));
+
+            return "ok " + String.valueOf(hederaFile.fileNum);
         }
     }
 }
