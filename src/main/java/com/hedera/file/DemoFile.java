@@ -125,17 +125,26 @@ public final class DemoFile {
 					"-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789" + 
 					"-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789" + 
 					"-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789";
-			file = FileCreate.create(file, fileContents.getBytes());
+
+			try {
+			    Thread.sleep(2000);
+                file = FileCreate.create(file, fileContents.getBytes());
+            } catch (Exception ex) {
+			    logger.warn("while creating file", ex);
+            }
 		}
         if (file != null) {
         	if (doGetInfo) {
+                Thread.sleep(2000);
         		FileGetInfo.getInfo(file);
         	}
         	if (doAppend) {
 	    		// append to a file
+                Thread.sleep(2000);
 	            FileAppend.append(file,"Appended contents".getBytes());
 	    		// get file contents
 	        	if (doGetContents) {
+                    Thread.sleep(2000);
 	        		FileGetContents.getContents(file);
 	        	}
         	}

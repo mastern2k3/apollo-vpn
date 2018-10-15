@@ -17,7 +17,7 @@ public final class FileGetContents {
 		byte[] contents = file.getContents();
 		if (contents != null) {
 			// it was successful, print it
-			logger.info("===>Got contents=");
+			logger.info("===>Got contents= len: {}", contents.length);
 			logger.info(new String(contents,"UTF-8"));
 		} else {
 			// an error occurred
