@@ -4,8 +4,8 @@ import java.util.UUID;
 
 public class RequestSpec {
 
-    String uri;
-    String id;
+    public String uri;
+    public String id;
 
     public static RequestSpec of(String uri) {
         RequestSpec requestSpec = new RequestSpec();
