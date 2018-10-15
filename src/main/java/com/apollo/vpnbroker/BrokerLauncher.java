@@ -1,76 +1,91 @@
 package com.apollo.vpnbroker;
 
-import com.hedera.file.FileCreate;
-import com.hedera.file.FileGetContents;
-import com.hedera.sdk.account.HederaAccount;
-import com.hedera.sdk.common.HederaKey;
-import com.hedera.sdk.common.HederaPrecheckResult;
-import com.hedera.sdk.common.HederaTransactionAndQueryDefaults;
-import com.hedera.sdk.cryptography.HederaCryptoKeyPair;
-import com.hedera.sdk.file.HederaFile;
-import com.hedera.utilities.ExampleUtilities;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 
 public class BrokerLauncher {
 
+    static final Logger logger = LoggerFactory.getLogger(BrokerLauncher.class);
 
+    public static class BrokerLoop implements Runnable {
+
+        private volatile boolean cancelled;
+
+        public void run() {
+
+            logger.info("Broker loop started");
+
+            while (!cancelled) {
+                try {
+                    Thread.sleep(2000);
+
+
+                } catch (Exception ex) {
+                    logger.error("Error on broker loop", ex);
+                }
+            }
+        }
+
+        public void cancel()
+        {
+            cancelled = true;
+        }
+
+        public boolean isCancelled() {
+            return cancelled;
+        }
+    }
 
     public static void main(String[] args) throws Exception {
 
-//        DemoFile.main();
+        HttpServer server = HttpServer.create(new InetSocketAddress(7891), 0);
 
+        server.createContext("/stats", new BrokerLauncher.StateHandler());
 
-        byte[] bytes = "https://api.myjson.com/bins/gwzhc".getBytes(StandardCharsets.UTF_8);
+        Thread thread = new Thread(new BrokerLoop());
 
-        HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
-        HederaTransactionAndQueryDefaults fd = ExampleUtilities.getTxQueryDefaults();
+        thread.start();
 
-        qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
-        fd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+        server.setExecutor(null);
 
-        System.out.print(qd.payingAccountID);
+        logger.info("Broker api starting at http://127.0.0.1:7891/stats");
+        server.start();
+    }
 
-        HederaAccount hederaAccount = new HederaAccount();
+    static abstract class BaseHandler implements HttpHandler {
 
-        hederaAccount.txQueryDefaults = qd;
+        public abstract String handleToString(HttpExchange t) throws Exception;
 
-        hederaAccount.setHederaAccountID(qd.payingAccountID);
+        @Override
+        public void handle(HttpExchange t) throws IOException {
 
-        long balance = hederaAccount.getBalance();
+            String response;
 
-        System.out.print("balance ");
-        System.out.print(balance);
+            try {
+                response = handleToString(t);
+                t.sendResponseHeaders(200, response.length());
+            } catch (Exception ex) {
+                response = ex.toString();
+                t.sendResponseHeaders(500, response.length());
+            }
 
-        HederaFile hederaFile = new HederaFile();
-
-        hederaFile.txQueryDefaults = qd;
-        hederaFile.fileNum = 9090;
-
-        try {
-            hederaFile = FileCreate.create(hederaFile, bytes);
-        } catch (Exception ex) {
-            System.out.print(ex);
+            OutputStream os = t.getResponseBody();
+            os.write(response.getBytes());
+            os.close();
         }
+    }
 
-        FileGetContents.getContents(hederaFile);
-
-        System.out.print("hederaFile.fileNum ");
-        System.out.print(hederaFile.fileNum);
-
-        hederaFile = new HederaFile();
-
-        hederaFile.txQueryDefaults = qd;
-        hederaFile.fileNum = 9099;
-
-        HederaPrecheckResult precheckResult = hederaFile.getPrecheckResult();
-
-        System.out.print("precheckResult ");
-        System.out.print(precheckResult);
-
-        byte[] contents = hederaFile.getContents();
-
-        System.out.print("contents: ");
-        System.out.print(new String(contents, StandardCharsets.UTF_8));
+    static class StateHandler extends BaseHandler {
+        @Override
+        public String handleToString(HttpExchange t) throws Exception {
+            return "ok";
+        }
     }
 }

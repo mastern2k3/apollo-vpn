@@ -55,7 +55,7 @@ public final class FileCreate {
 					}
 					else {
 						System.err.println("Appending Failure");
-						System.exit(0);
+//						System.exit(0);
 					}
 				}
 			} else {
