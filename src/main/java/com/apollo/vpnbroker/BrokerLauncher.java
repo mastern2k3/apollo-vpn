@@ -7,6 +7,7 @@ import com.apollo.schema.StatsSpec;
 import com.google.gson.Gson;
 import com.hedera.file.FileAppend;
 import com.hedera.file.FileCreate;
+import com.hedera.file.FileGetContents;
 import com.hedera.sdk.account.HederaAccount;
 import com.hedera.sdk.common.HederaKey;
 import com.hedera.sdk.common.HederaTransactionAndQueryDefaults;
@@ -19,14 +20,12 @@ import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -39,12 +38,16 @@ public class BrokerLauncher {
     private static HederaFile _requestsFile;
     private static HederaFile _responseFile;
 
+
     public static void main(String[] args) throws Exception {
 
         _requestsFile = createRequestsFile();
+
+        Thread.sleep(2000);
+
         _responseFile = createResponseFile();
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(7891), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(7891), 8);
 
         server.createContext("/api/stats", new BrokerLauncher.StateHandler());
         server.createContext("/api/getfile", new BrokerLauncher.GetFileHandler());
@@ -130,6 +133,11 @@ public class BrokerLauncher {
 
             long id = Long.parseLong(idStr);
 
+            byte[] contents = FileGetContents.fileCache.getOrDefault(id, null);
+
+            if (contents != null)
+                return new String(contents, StandardCharsets.UTF_8);
+
             HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
 
             qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
@@ -140,7 +148,10 @@ public class BrokerLauncher {
             hederaFile.txQueryDefaults = qd;
             hederaFile.fileNum = id;
 
-            byte[] contents = hederaFile.getContents();
+            contents = FileGetContents.getContents(hederaFile);
+
+            if (contents != null && contents.length > 0)
+                FileGetContents.fileCache.put(id, contents);
 
             return new String(contents, StandardCharsets.UTF_8);
         }
@@ -219,7 +230,6 @@ public class BrokerLauncher {
         HederaFile hederaFile = new HederaFile();
 
         hederaFile.txQueryDefaults = qd;
-        hederaFile.expirationTime = Instant.now().plusSeconds(10);
 
         hederaFile =
             FileCreate.create(
@@ -238,14 +248,13 @@ public class BrokerLauncher {
         HederaFile hederaFile = new HederaFile();
 
         hederaFile.txQueryDefaults = qd;
-        hederaFile.expirationTime = Instant.now().plusSeconds(10);
 
         hederaFile = FileCreate.create(hederaFile, new byte[0]);
 
         return hederaFile;
     }
 
-    public static ResponseSpec LaunchRequest(RequestSpec requestSpec) throws IOException {
+    public static ResponseSpec LaunchRequest(RequestSpec requestSpec) throws Exception {
 
         URL url = new URL(requestSpec.uri);
 
@@ -255,15 +264,17 @@ public class BrokerLauncher {
         int status = con.getResponseCode();
 
         // Finally, let’s read the response of the request and place it in a content String:
-        BufferedReader in = new BufferedReader(
-            new InputStreamReader(con.getInputStream()));
+        InputStream in = con.getInputStream();
 
-        String inputLine;
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
 
-        StringBuffer content = new StringBuffer();
+        byte[] buffer = new byte[1024];
+        int len;
 
-        while ((inputLine = in.readLine()) != null) {
-            content.append(inputLine);
+        // read bytes from the input stream and store them in buffer
+        while ((len = in.read(buffer)) != -1) {
+            // write bytes from the buffer into output stream
+            os.write(buffer, 0, len);
         }
 
         in.close();
@@ -271,17 +282,31 @@ public class BrokerLauncher {
         // To close the connection, we can use the disconnect() method:
         con.disconnect();
 
+        HederaTransactionAndQueryDefaults qd = ExampleUtilities.getTxQueryDefaults();
+
+        qd.fileWacl = new HederaCryptoKeyPair(HederaKey.KeyType.ED25519);
+
+        HederaFile hederaFile = new HederaFile();
+
+        hederaFile.txQueryDefaults = qd;
+
+        byte[] content = os.toByteArray();
+
+        hederaFile = FileCreate.create(hederaFile, os.toByteArray());
+
+        FileGetContents.fileCache.put(hederaFile.fileNum, content);
+
         ResponseSpec responseSpec = new ResponseSpec();
 
         responseSpec.id = requestSpec.id;
-        responseSpec.content = content.toString();
+        responseSpec.contentFileNum = hederaFile.fileNum;
 
         return responseSpec;
     }
 
     public static RequestSpec[] getPendingRequests() throws Exception {
 
-        byte[] response = _responseFile.getContents();
+        byte[] response = FileGetContents.getContents(_responseFile);
 
         Set<String> answered;
 
@@ -296,7 +321,7 @@ public class BrokerLauncher {
 
         Thread.sleep(2000);
 
-        byte[] contents = _requestsFile.getContents();
+        byte[] contents = FileGetContents.getContents(_requestsFile);
 
         if (contents.length == 0) {
             return new RequestSpec[0];

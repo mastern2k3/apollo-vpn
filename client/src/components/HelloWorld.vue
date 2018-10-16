@@ -3,8 +3,15 @@
     <h1>{{ msg }}</h1>
     <h2>Stats: <code>{{ JSON.stringify(stats) }}</code></h2>
     <div>
-      <button v-on:click="clickme">Clickme</button>
-      <input type="text" v-model="reqUrl" /></div>
+      <button-spinner
+        :is-loading="isSubmitLoading" 
+        :disabled="isSubmitLoading"
+        :status="submitStatus"
+        v-on:click.native="clickme">
+        <span>submit</span>
+      </button-spinner>
+      <input type="text" class="ml-2" v-model="reqUrl" />
+    </div>
     <div class="mt-2">
       <table style="width: auto" class="mx-auto table">
         <tr>
@@ -15,7 +22,7 @@
         <tr v-for="r in getReqs" v-bind:key="r.id">
           <td><code>{{ r.id }}</code></td>
           <td><code>{{ r.uri }}</code></td>
-          <td><code>{{ r.response }}</code></td>
+          <td><code><a :href="`http://localhost:8080/api/getfile/${r.contentFileNum}`">{{ r.contentFileNum }}</a></code></td>
         </tr>
       </table>
     </div>
@@ -23,7 +30,8 @@
 </template>
 
 <script>
-const _ = require('lodash')
+import VueButtonSpinner from 'vue-button-spinner'
+import _ from 'lodash'
 
 export default {
   name: 'HelloWorld',
@@ -34,6 +42,8 @@ export default {
       stats: {},
       reqs: [],
       resps: [],
+      submitStatus: '',
+      isSubmitLoading: false,
     }
   },
   mounted () {
@@ -51,10 +61,13 @@ export default {
     getReqs () {
       return _.cloneDeep(this.reqs)
       .map(r => {
-          r.response = _.get(_.find(this.resps, { id: r.id }), 'content')
+          r.contentFileNum = _.get(_.find(this.resps, { id: r.id }), 'contentFileNum')
           return r
         })
     }
+  },
+  components: {	
+    'button-spinner': VueButtonSpinner
   },
   methods: {
     refreshRequests () {
@@ -71,14 +84,28 @@ export default {
           if (!txt) return
           this.resps = txt.split('\n').filter(ln => ln).map(ln => JSON.parse(ln))
         })
-      
-      setTimeout(() => this.refreshRequests(), 2000)
+
+      this.refreshTimeout = setTimeout(() => this.refreshRequests(), 2000)
     },
     clickme () {
+      this.isSubmitLoading = true
       fetch(`/api/postreq/${btoa(this.reqUrl)}`)
         .then(res => res.json())
         .then(res => {
-          alert(JSON.stringify(res))
+          this.isSubmitLoading = false
+          this.submitStatus = true
+          setTimeout(() => {
+            this.isSubmitLoading = false
+            this.submitStatus = ''    
+          }, 1000)
+        })
+        .catch(err => {
+          this.isSubmitLoading = false
+          this.submitStatus = false
+          setTimeout(() => {
+            this.isSubmitLoading = false
+            this.submitStatus = ''
+          }, 2000)
         })
     }
   }
