@@ -1,6 +1,7 @@
 package com.apollo.vpnbroker;
 
 import com.apollo.pubapi.PublicApiLauncher;
+import com.apollo.schema.PushSpec;
 import com.apollo.schema.RequestSpec;
 import com.apollo.schema.ResponseSpec;
 import com.apollo.schema.StatsSpec;
@@ -118,9 +119,16 @@ public class BrokerLauncher {
             byte[] decodedBytes = Base64.getDecoder().decode(idStr);
             String decodedString = new String(decodedBytes);
 
-            FileAppend.append(_requestsFile, (_gson.toJson(RequestSpec.of(decodedString)) + "\n").getBytes(StandardCharsets.UTF_8));
+            RequestSpec requestSpec = RequestSpec.of(decodedString);
 
-            return "{\"ok\":true}";
+            FileAppend.append(_requestsFile, (_gson.toJson(requestSpec) + "\n").getBytes(StandardCharsets.UTF_8));
+
+            PushSpec pushSpec = new PushSpec();
+
+            pushSpec.reqId = requestSpec.id;
+            pushSpec.respUrl = "http://localhost:7891/api/getfile/" + String.valueOf(_responseFile.fileNum);
+
+            return _gson.toJson(pushSpec);
         }
     }
 

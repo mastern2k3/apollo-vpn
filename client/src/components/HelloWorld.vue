@@ -1,8 +1,8 @@
 <template>
   <div class="hello">
     <h1>{{ msg }}</h1>
-    <h2>Stats: <code>{{ JSON.stringify(stats) }}</code></h2>
-    <div>
+    <h2 class="mt-4">Stats: <code>{{ JSON.stringify(stats) }}</code></h2>
+    <div class="mt-3">
       <button-spinner
         :is-loading="isSubmitLoading" 
         :disabled="isSubmitLoading"
@@ -10,7 +10,7 @@
         v-on:click.native="clickme">
         <span>submit</span>
       </button-spinner>
-      <input type="text" class="ml-2" v-model="reqUrl" />
+      <input type="text" class="ml-2" v-model="reqUrl" style="width: 300px" />
     </div>
     <div class="mt-2">
       <table style="width: auto" class="mx-auto table">
